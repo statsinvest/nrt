@@ -17,6 +17,8 @@ NRT generates income mainly by collecting royalties from operating companies
 that extract natural gas from wells that NRT owns.
 NRT has no debt, and its natural gas wells have remaining reserve levels 
 that are closely monitored each year.
+Additionally, NRT has a finite life: when its reserves are depleted, it will likely be 
+dissolved.
 
 
 ## Parameters
