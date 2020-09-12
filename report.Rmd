@@ -1,0 +1,207 @@
+---
+title: "NYSE: NRT"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE);
+set.seed(1337);
+```
+
+# North European Oil Royalty Trust
+
+NRT is a trust, and it is unlike most companies listed on the New York Stock Exchange,
+though it has a fairly predictable cash flow.
+NRT generates income mainly by collecting royalties from operating companies
+that extract natural gas from wells that NRT owns.
+NRT has no debt, and its natural gas wells have remaining reserve levels 
+that are closely monitored each year.
+
+
+## Parameters
+
+```{r}
+# individualized risk-free rate
+discount <- 0.0065;
+
+# federal income bracket: $39,376 - $434,500
+# net investment income tax: > $200,000
+# state tax
+# local tax
+tax <- 0.15 + 0.038 + 0.088 + 0.039;
+
+# number of simulation rounds
+B <- 10000;
+```
+
+## Input data
+
+We can glean the following input data from the annual and quarterly reports
+from the company.
+
+```{r}
+# net reserves at the start of 2020
+# (with royalty rates factored in)
+reserves.2020 <- 6429.7;
+
+# net sales in 2016, 2017, 2018, 2019 in terms of commodity quantity
+# (with royalty rates factored in)
+sales.past <- c(1392, 1330, 1066, 1215);
+
+# according to 10-Q for 2020 Q1, Q2, and Q3, sales quantities are down about 10%
+sales.current <- sales.past[4] * (1 - 0.1);
+
+# dividend per share in 2016, 2017, 2018, 2019
+dividends.past <- c(0.67, 0.76, 0.70, 0.82);
+
+# dividend per share in 2020 Q1, Q2, Q3, and Q4(E)
+dividend.2020.q4 <- 0.08;
+dividend.current <- 0.08 + 0.11 + 0.11 + dividend.2020.q4;
+
+# net reserve for the start of 2021
+reserves.current <- reserves.2020 - sales.current;
+
+dividends <- c(dividends.past, dividend.current);
+sales <- c(sales.past, sales.current);
+
+# number of data points
+n <- length(sales);
+```
+
+Here is where we make our judgement calls.
+Given the relative stability and predictability of this trust,
+we can probably expect its future dividends to be similar to the past.
+
+We must specify how probable we will observe each historical data point.
+We believe that there is some chance that next year may be similar to
+current year, though we think we will most likely see sales and dividends
+similar to fiscal year 2019.
+
+```{r}
+# probability of sampling each historical data point
+probs <- c(0.1, 0.1, 0.1, 0.5, 0.2);
+probs <- probs / sum(probs);
+```
+
+## Functions
+
+```{r}
+# Project one year of dividend and remaining reserves.
+# @param reserves  initial reserves
+project <- function(reserves) {
+	# sample one data point from historical data of (dividends, sales)
+	i <- sample.int(n, 1, prob=probs);
+
+	if (sales[i] < reserves) {
+	  # sufficient reserves remaining
+		list(
+			dividend = dividends[i],
+			reserves = reserves - sales[i]
+		)
+	} else {
+		list(
+			# dividend must be discounted due to insufficient reserves
+			dividend = dividends[i] * (reserves / sales[i]),
+			# reserves are completely depleted
+			reserves = 0
+		)
+	}
+}
+
+# Calculate present value of future cash flow
+# @param cf  future cash flow
+# @param r   discount rate
+present_value <- function(cf, r) {
+	n <- length(cf);
+	cf / (1 + r)^(1:n)
+}
+```
+
+## Analysis
+
+Based on the parameters and the input data, we are now ready to estimate
+discounted future cash flows.
+
+```{r}
+# simulate a list of payouts
+payouts.l <- lapply(
+	1:B,
+	function(b) {
+		r <- reserves.current;
+		payouts <- NULL;
+		while (r > 0) {
+			p <- project(r);
+			payouts <- c(payouts, p$dividend);
+			r <- p$reserves;
+		}
+
+		payouts
+	}
+);
+
+# years remaining
+years <- unlist(lapply(payouts.l, length));
+table(years)
+
+# total discounted cash flow
+dcfs <- unlist(lapply(
+	payouts.l,
+	function(payouts) {
+		sum(present_value(payouts * (1 - tax), discount)) +
+			dividend.2020.q4 * (1 - tax)
+	}
+));
+
+# total discounted cash flow under no tax scenario
+dcfs.no.tax <- unlist(lapply(
+	payouts.l,
+	function(payouts) {
+		sum(present_value(payouts, discount)) +
+			dividend.2020.q4
+	}
+));
+```
+
+From our estimates of discounted cash flows, we can now determine our profitability.
+By specifying our target probability of generating a profit, we can identify our
+entry prices for the stock.
+
+```{r}
+profit.prob <- 0.95;
+# entry price given target probability of profit
+quantile(dcfs, 1 - profit.prob)
+quantile(dcfs.no.tax, 1 - profit.prob)
+```
+
+Alternatively, we can determine whether the current price is attractive,
+by calculating the expected margin for the present value of profit given 
+the current price.
+
+```{r}
+price <- 3.03;
+mean(dcfs / price) - 1
+mean(dcfs.no.tax / price) - 1
+```
+
+We can also determine the probability of profit given the current price.
+
+```{r}
+mean(dcfs > price)
+mean(dcfs.no.tax > price)
+```
+
+If we were to profit, our expected margin for the present value of profit is
+```{r}
+mean(dcfs.no.tax[dcfs.no.tax > price]) / price - 1
+```
+
+Let us visualize the distributions of discounted cash flows.
+
+```{r}
+hist(dcfs, breaks=20)
+abline(v = price, col="red")
+
+hist(dcfs.no.tax, breaks=20)
+abline(v = price, col="red")
+```
